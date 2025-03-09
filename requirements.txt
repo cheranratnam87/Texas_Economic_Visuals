@@ -1,8 +1,12 @@
 streamlit
 pandas
+numpy
 matplotlib
 seaborn
 statsmodels
-prophet
-pymc3
 pmdarima
+prophet
+pymc
+arviz
+pytensor
+cmdstanpy
