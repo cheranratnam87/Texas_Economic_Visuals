@@ -5,3 +5,4 @@ seaborn
 statsmodels
 prophet
 pymc3
+pmdarima
