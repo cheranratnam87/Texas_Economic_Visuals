@@ -9,4 +9,3 @@ prophet
 pymc
 arviz
 pytensor
-cmdstanpy
