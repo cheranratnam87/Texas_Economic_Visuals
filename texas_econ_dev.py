@@ -21,7 +21,8 @@ def load_data():
 df = load_data()
 
 # ---- 2️⃣ Create Tabs ----
-tab1, tab2 = st.tabs(["📈 Data Exploration", "📊 Forecasts"])
+tab1, tab2, tab3 = st.tabs(["📈 Data Exploration", "📊 Forecasts", "🏛️ USA vs Texas Comparisons"])
+
 
 # ---- Sidebar (Now Works for Both Tabs) ----
 if "forecast_months" not in st.session_state:
@@ -82,7 +83,7 @@ with tab2:
     forecast_months = st.session_state["forecast_months"]
 
     # ---- ARIMA Forecast (Unemployment) ----
-    st.subheader("📉 ARIMA Forecast - Unemployment Rate (TX)")
+    st.subheader("👨‍💼 ARIMA Forecast - Unemployment Rate (TX)")
 
     # Fit ARIMA Model
     arima_model = ARIMA(df['unemployment_tx'], order=(1,1,1)).fit()
@@ -117,38 +118,252 @@ with tab2:
         """
     )
 
-    # ---- Prophet Forecast (Consumer Confidence) ----
-    st.subheader("📊 Prophet Forecast - Consumer Confidence Index")
+    # Define Texas colors
+    TEXAS_RED = "#BF0D3E"
+    TEXAS_BLUE = "#002147"
+    TEXAS_WHITE = "#FFFFFF"
+
+    import numpy as np
+    from statsmodels.tsa.statespace.sarimax import SARIMAX
+    from statsmodels.tsa.holtwinters import ExponentialSmoothing
+    import pymc as pm
+    from prophet import Prophet
+
+    # ---- 📅 SARIMA (Seasonal ARIMA) Forecast ----
+    st.subheader(f"📉 SARIMA (Seasonal ARIMA) Forecast for {selected_state.replace('_', ' ').title()}")
+
+    sarima_model = SARIMAX(df[selected_state], order=(1,1,1), seasonal_order=(1,1,1,12)).fit()
+    forecast_sarima = sarima_model.forecast(steps=forecast_months)
+
+    fig, ax = plt.subplots(figsize=(8, 4))
+    ax.plot(df.index, df[selected_state], label="Actual", color=TEXAS_BLUE)
+    ax.plot(pd.date_range(df.index[-1], periods=forecast_months, freq='ME'), forecast_sarima, linestyle="dashed", color=TEXAS_RED, label="SARIMA Forecast")
+    ax.legend()
+    st.pyplot(fig)
+
+    st.markdown("### 🔍 Key Insights")
+    st.markdown(
+    """
+    - **SARIMA captures both trend & seasonality**, making it ideal for unemployment cycles.
+    - **Unlike ARIMA, it considers annual/seasonal patterns** (e.g., COVID or economic recessions).
+    - **Next Steps:** Compare SARIMA vs. ARIMA and test longer forecast horizons.
+    """
+    )
+
+    from statsmodels.tsa.holtwinters import ExponentialSmoothing
+
+    st.subheader(f"📊 Holt-Winters (Exponential Smoothing) Forecast for {selected_state.replace('_', ' ').title()}")
+
+    # Ensure positive values and check if data is sufficient
+    ets_input = df[selected_state].replace(0, 0.01).dropna()
+
+    # Ensure enough data points for ETS (must be at least 2 * seasonal_periods)
+    if len(ets_input) >= 12:  
+        seasonal_period = min(6, max(2, len(ets_input) // 2))  # Adjust seasonal periods dynamically
+
+        ets_model = ExponentialSmoothing(
+            ets_input, 
+            trend="add", 
+            seasonal="add", 
+            seasonal_periods=seasonal_period
+        ).fit()
+        
+        forecast_ets = ets_model.forecast(forecast_months)
+    else:
+        st.warning("⚠ Not enough data for Holt-Winters model. Using simple moving average instead.")
+        forecast_ets = ets_input.rolling(window=3, min_periods=1).mean().iloc[-1]
+        forecast_ets = [forecast_ets] * forecast_months  # Repeat last value
+
+    # Plot ETS Forecast
+    fig, ax = plt.subplots(figsize=(8, 4))
+    ax.plot(df.index, df[selected_state], label="Actual", color=TEXAS_BLUE)
+    ax.plot(pd.date_range(df.index[-1], periods=forecast_months, freq='ME'), forecast_ets, linestyle="dashed", color=TEXAS_RED, label="ETS Forecast")
+    ax.legend()
+    st.pyplot(fig)
+
+    st.markdown("### 🔍 Insights on ETS Model")
+    st.markdown(
+    """
+    - **Holt-Winters captures both trends & seasonality**, making it useful for unemployment cycles.
+    - **More flexible than ARIMA for short-term forecasting.**
+    - **If there isn’t enough data, a simple trend model is used instead.**
+    """
+    )
+
+
+    # ---- 💳 Consumer Confidence Index Forecast ----
+    st.header("💰 Consumer Confidence Index Forecast")
+
+    df_confidence = df[['consumer_confidence_index_texas']].reset_index().rename(columns={"date": "ds", "consumer_confidence_index_texas": "y"})
+
+    # ---- Prophet Model ----
+    prophet_model = Prophet()
+    prophet_model.fit(df_confidence)
+
+    future = prophet_model.make_future_dataframe(periods=forecast_months, freq='ME')
+    forecast_prophet = prophet_model.predict(future)
+
+    # ---- ARIMA Model ----
+    arima_confidence = ARIMA(df['consumer_confidence_index_texas'], order=(1,1,1)).fit()
+    forecast_arima_confidence = arima_confidence.forecast(steps=forecast_months)
+
+    # ---- SARIMA Model ----
+    sarima_confidence = SARIMAX(df['consumer_confidence_index_texas'], order=(1,1,1), seasonal_order=(1,1,1,12)).fit()
+    forecast_sarima_confidence = sarima_confidence.forecast(steps=forecast_months)
+
+    # ---- Holt-Winters (ETS) ----
+    ets_confidence = ExponentialSmoothing(df['consumer_confidence_index_texas'].dropna(), trend="add", seasonal="add", seasonal_periods=12).fit()
+    forecast_ets_confidence = ets_confidence.forecast(steps=forecast_months)
+
+    # ---- Plot all forecasts ----
+    fig, ax = plt.subplots(figsize=(10, 5))
+
+    # Actual Data
+    ax.plot(df.index, df['consumer_confidence_index_texas'], label="Actual", color=TEXAS_BLUE)
+
+    # Forecasts
+    ax.plot(pd.date_range(df.index[-1], periods=forecast_months, freq='ME'), forecast_prophet['yhat'][-forecast_months:], linestyle="dashed", color="green", label="Prophet Forecast")
+    ax.plot(pd.date_range(df.index[-1], periods=forecast_months, freq='ME'), forecast_arima_confidence, linestyle="dashed", color="orange", label="ARIMA Forecast")
+    ax.plot(pd.date_range(df.index[-1], periods=forecast_months, freq='ME'), forecast_sarima_confidence, linestyle="dashed", color="red", label="SARIMA Forecast")
+    ax.plot(pd.date_range(df.index[-1], periods=forecast_months, freq='ME'), forecast_ets_confidence, linestyle="dashed", color="purple", label="ETS Forecast")
+
+    ax.legend()
+    st.pyplot(fig)
+
+    # ---- Key Insights ----
+    st.markdown("### 🔍 Key Insights")
+    st.markdown(
+
+
+
+
+    """
+    **What is Consumer Confidence?**  
+    - This index reflects **how optimistic or pessimistic consumers feel** about the economy.
+
+    **Recent Trends:**
+    - Confidence was **high before 2020** but dipped due to the pandemic.
+    - Post-2021, fluctuations indicate **economic uncertainty**.
+
+    **Forecast Interpretation:**
+    - The model predicts **a potential decline in consumer confidence** over the next few years.
+    - Economic factors like **inflation, interest rates, and job growth** can heavily influence this trend.
+
+    **Conclusion:**  
+    - **Stable consumer confidence = strong economy.**
+    - If confidence drops, **business spending and investments may decline**.
+    """
+
+
+    """
+    - **Prophet:** Captures trends & seasonality, robust to missing data.
+    - **ARIMA:** Works well if data is non-seasonal and follows a linear trend.
+    - **SARIMA:** Best for seasonal patterns, considers yearly trends.
+    - **Holt-Winters (ETS):** Smooths trends and is useful for short-term forecasting.
+
+    **Next Steps:**
+    - Compare model accuracy and refine hyperparameters.
+    - Monitor external factors like interest rates & inflation that impact consumer confidence.
+    """
+    )
+
+
+
+
+
+    # ---- 🖥️ Consumer Confidence Forecast with Multiple Models ----
+    st.subheader("📊 Forecasting Consumer Confidence Index (TX)")
+
+    # Prepare Data
     df_prophet = df[['consumer_confidence_index_texas']].reset_index().rename(columns={"date": "ds", "consumer_confidence_index_texas": "y"})
+
+    # 📈 Prophet Forecast
+    st.subheader("💳 Prophet Forecast")
     prophet_model = Prophet()
     prophet_model.fit(df_prophet)
 
-    future = prophet_model.make_future_dataframe(periods=forecast_months, freq='M')
-    forecast_confidence = prophet_model.predict(future)
+    future = prophet_model.make_future_dataframe(periods=forecast_months, freq='ME')
+    forecast_prophet = prophet_model.predict(future)
 
-    fig2 = prophet_model.plot(forecast_confidence)
+    fig1 = prophet_model.plot(forecast_prophet)
+    st.pyplot(fig1)
+
+    # 📅 SARIMA Forecast (Seasonal ARIMA)
+    st.subheader("💵 SARIMA Forecast")
+    sarima_model = SARIMAX(df['consumer_confidence_index_texas'], order=(1,1,1), seasonal_order=(1,1,1,12)).fit()
+    forecast_sarima = sarima_model.forecast(steps=forecast_months)
+
+    fig2, ax2 = plt.subplots(figsize=(8, 4))
+    ax2.plot(df.index, df['consumer_confidence_index_texas'], label="Actual", color="blue")
+    ax2.plot(pd.date_range(df.index[-1], periods=forecast_months, freq='ME'), forecast_sarima, linestyle="dashed", color="red", label="SARIMA Forecast")
+    ax2.legend()
     st.pyplot(fig2)
 
-    # ---- Explanation for Consumer Confidence Forecast ----
-    st.markdown("### **📈 Understanding Consumer Confidence Trends**")
+    # 💡 Holt-Winters (ETS - Exponential Smoothing)
+    st.subheader("📈 Holt-Winters (ETS) Forecast")
+    ets_input = df['consumer_confidence_index_texas'].dropna()
+
+    if len(ets_input) >= 12:
+        seasonal_period = min(6, max(2, len(ets_input) // 2))
+        ets_model = ExponentialSmoothing(ets_input, trend="add", seasonal="add", seasonal_periods=seasonal_period).fit()
+        forecast_ets = ets_model.forecast(forecast_months)
+    else:
+        st.warning("⚠ Not enough data for Holt-Winters model. Using simple moving average instead.")
+        forecast_ets = ets_input.rolling(window=3, min_periods=1).mean().iloc[-1]
+        forecast_ets = [forecast_ets] * forecast_months
+
+    fig3, ax3 = plt.subplots(figsize=(8, 4))
+    ax3.plot(df.index, df['consumer_confidence_index_texas'], label="Actual", color="blue")
+    ax3.plot(pd.date_range(df.index[-1], periods=forecast_months, freq='ME'), forecast_ets, linestyle="dashed", color="green", label="ETS Forecast")
+    ax3.legend()
+    st.pyplot(fig3)
+
+
+
+
+with tab3:
+    st.session_state["active_tab"] = "USA vs Texas Comparisons"
+    st.header("🏛️ USA vs 🤠 Texas Economic Comparison")
+
+    # 👷 Unemployment Comparison
+    st.subheader("📆 Unemployment Rate: Texas vs USA")
+    fig1, ax1 = plt.subplots(figsize=(10, 5))
+    ax1.plot(df.index, df['unemployment_tx'], label="Texas Unemployment", color=TEXAS_BLUE, linestyle="-")
+    ax1.plot(df.index, df['unemployment_us'], label="USA Unemployment", color="red", linestyle="--")
+    ax1.set_title("Unemployment Rate Comparison (TX vs USA)")
+    ax1.legend()
+    st.pyplot(fig1)
+
+    # 🔍 Insights
+    st.markdown("### 💡 Key Takeaways on Unemployment")
     st.markdown(
         """
-        **What is Consumer Confidence?**  
-        - This index reflects **how optimistic or pessimistic consumers feel** about the economy.
-        
-        **Recent Trends:**
-        - Confidence was **high before 2020** but dipped due to the pandemic.
-        - Post-2021, fluctuations indicate **economic uncertainty**.
-
-        **Forecast Interpretation:**
-        - The model predicts **a potential decline in consumer confidence** over the next few years.
-        - Economic factors like **inflation, interest rates, and job growth** can heavily influence this trend.
-
-        **Conclusion:**  
-        - **Stable consumer confidence = strong economy.**
-        - If confidence drops, **business spending and investments may decline**.
+        - **Texas unemployment rates** have historically been **lower** than the **USA average**, indicating a strong job market.
+        - **Economic shocks (e.g., 2008 Recession, COVID-19)** impacted both, but Texas often recovered faster.
+        - **Industries in Texas (energy, tech, manufacturing)** provide **economic resilience** compared to the national average.
         """
     )
+
+    # 💰 Consumer Confidence Comparison
+    st.subheader("💳 Consumer Confidence Index: Texas vs USA")
+    fig2, ax2 = plt.subplots(figsize=(10, 5))
+    ax2.plot(df.index, df['consumer_confidence_index_texas'], label="Texas Confidence Index", color=TEXAS_BLUE, linestyle="-")
+    ax2.plot(df.index, df['consumer_confidence_index_us'], label="USA Confidence Index", color="red", linestyle="--")
+    ax2.set_title("Consumer Confidence Index Comparison (TX vs USA)")
+    ax2.legend()
+    st.pyplot(fig2)
+
+    # 🔍 Insights
+    st.markdown("### 🔍 Key Takeaways on Consumer Confidence")
+    st.markdown(
+        """
+        - **Texas consumers are generally more optimistic** than the national average, reflecting a strong local economy.
+        - **Post-2020 trends show more volatility** due to supply chain disruptions, inflation, and interest rate shifts.
+        - **A higher consumer confidence index** means more consumer spending, which boosts business activity in Texas.
+        """
+    )
+
+
 
 # ---- Footer Section ----
 st.markdown("---")
