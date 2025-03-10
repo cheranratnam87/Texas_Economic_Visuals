@@ -4,8 +4,4 @@ numpy
 matplotlib
 seaborn
 statsmodels
-pmdarima
 prophet
-pymc
-arviz
-pytensor
