@@ -46,7 +46,8 @@ with tab1:
 
     # State Indicator Dropdown (Default: Unemployment TX)
     state_columns = [col for col in df.columns if 'nonfarm_employment' in col or 'unemployment' in col or 'consumer_confidence' in col]
-    selected_state = st.selectbox("Select State Indicator", state_columns, index=state_columns.index('unemployment_tx'))
+    default_state = 'unemployment_tx' if 'unemployment_tx' in state_columns else state_columns[0]
+    selected_state = st.selectbox("Select State Indicator", state_columns, index=state_columns.index(default_state))
 
     # Filter dataset based on selection
     filtered_df = df[(df.index.year >= selected_year_range[0]) & (df.index.year <= selected_year_range[1])]
