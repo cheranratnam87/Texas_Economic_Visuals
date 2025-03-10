@@ -3,6 +3,8 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 from statsmodels.tsa.arima.model import ARIMA
+from statsmodels.tsa.statespace.sarimax import SARIMAX
+from statsmodels.tsa.holtwinters import ExponentialSmoothing
 from prophet import Prophet
 
 # ---- 1️⃣ Load Data ----
@@ -12,38 +14,16 @@ st.subheader("Explore Texas Economic Trends and Forecasts")
 
 @st.cache_data
 def load_data():
-    url = "https://raw.githubusercontent.com/cheranratnam87/Texas_Economic_Visuals/main/Key_Economic_Indicators_20250309.csv"
-
-    # Load data with error handling
-    try:
-        df = pd.read_csv(url, low_memory=False)
-        df.rename(columns=lambda x: x.strip().lower(), inplace=True)  # Normalize column names
-    except Exception as e:
-        st.error(f"Error loading data: {e}")
-        return None
-
-    # Debugging: Print column names
-    print("Columns in dataset:", df.columns)
-
-    # Ensure required columns exist
-    required_columns = {'year', 'month'}
-    if not required_columns.issubset(set(df.columns)):
-        st.error("🚨 Missing required columns: 'year' or 'month'. Please check the dataset.")
-        return None
-
-    # Convert 'year' and 'month' to datetime index
+    url = "https://data.texas.gov/resource/karz-jr5v.csv"
+    df = pd.read_csv(url)
     df['date'] = pd.to_datetime(df[['year', 'month']].assign(day=1))
     df.set_index('date', inplace=True)
-
     return df
-
-
 
 df = load_data()
 
 # ---- 2️⃣ Create Tabs ----
 tab1, tab2, tab3 = st.tabs(["📈 Data Exploration", "📊 Forecasts", "🏛️ USA vs Texas Comparisons"])
-
 
 # ---- Sidebar (Now Works for Both Tabs) ----
 if "forecast_months" not in st.session_state:
@@ -106,8 +86,12 @@ with tab2:
     # ---- ARIMA Forecast (Unemployment) ----
     st.subheader("👨‍💼 ARIMA Forecast - Unemployment Rate (TX)")
 
-    # Fit ARIMA Model
-    arima_model = ARIMA(df['unemployment_tx'], order=(1,1,1)).fit()
+    @st.cache_data
+    def fit_arima_model(data):
+        model = ARIMA(data, order=(1,1,1)).fit()
+        return model
+
+    arima_model = fit_arima_model(df['unemployment_tx'])
     forecast_arima = arima_model.forecast(steps=forecast_months)
 
     # Plot ARIMA Forecast
@@ -144,16 +128,15 @@ with tab2:
     TEXAS_BLUE = "#002147"
     TEXAS_WHITE = "#FFFFFF"
 
-    import numpy as np
-    from statsmodels.tsa.statespace.sarimax import SARIMAX
-    from statsmodels.tsa.holtwinters import ExponentialSmoothing
-    import pymc as pm
-    from prophet import Prophet
-
     # ---- 📅 SARIMA (Seasonal ARIMA) Forecast ----
     st.subheader(f"📉 SARIMA (Seasonal ARIMA) Forecast for {selected_state.replace('_', ' ').title()}")
 
-    sarima_model = SARIMAX(df[selected_state], order=(1,1,1), seasonal_order=(1,1,1,12)).fit()
+    @st.cache_data
+    def fit_sarima_model(data):
+        model = SARIMAX(data, order=(1,1,1), seasonal_order=(1,1,1,12)).fit()
+        return model
+
+    sarima_model = fit_sarima_model(df[selected_state])
     forecast_sarima = sarima_model.forecast(steps=forecast_months)
 
     fig, ax = plt.subplots(figsize=(8, 4))
@@ -171,24 +154,18 @@ with tab2:
     """
     )
 
-    from statsmodels.tsa.holtwinters import ExponentialSmoothing
-
+    # ---- Holt-Winters (Exponential Smoothing) Forecast ----
     st.subheader(f"📊 Holt-Winters (Exponential Smoothing) Forecast for {selected_state.replace('_', ' ').title()}")
 
-    # Ensure positive values and check if data is sufficient
+    @st.cache_data
+    def fit_ets_model(data):
+        seasonal_period = min(6, max(2, len(data) // 2))  # Adjust seasonal periods dynamically
+        model = ExponentialSmoothing(data, trend="add", seasonal="add", seasonal_periods=seasonal_period).fit()
+        return model
+
     ets_input = df[selected_state].replace(0, 0.01).dropna()
-
-    # Ensure enough data points for ETS (must be at least 2 * seasonal_periods)
-    if len(ets_input) >= 12:  
-        seasonal_period = min(6, max(2, len(ets_input) // 2))  # Adjust seasonal periods dynamically
-
-        ets_model = ExponentialSmoothing(
-            ets_input, 
-            trend="add", 
-            seasonal="add", 
-            seasonal_periods=seasonal_period
-        ).fit()
-        
+    if len(ets_input) >= 12:
+        ets_model = fit_ets_model(ets_input)
         forecast_ets = ets_model.forecast(forecast_months)
     else:
         st.warning("⚠ Not enough data for Holt-Winters model. Using simple moving average instead.")
@@ -211,29 +188,28 @@ with tab2:
     """
     )
 
-
     # ---- 💳 Consumer Confidence Index Forecast ----
     st.header("💰 Consumer Confidence Index Forecast")
 
     df_confidence = df[['consumer_confidence_index_texas']].reset_index().rename(columns={"date": "ds", "consumer_confidence_index_texas": "y"})
 
-    # ---- Prophet Model ----
-    prophet_model = Prophet()
-    prophet_model.fit(df_confidence)
+    @st.cache_data
+    def fit_prophet_model(data):
+        model = Prophet()
+        model.fit(data)
+        return model
 
+    prophet_model = fit_prophet_model(df_confidence)
     future = prophet_model.make_future_dataframe(periods=forecast_months, freq='ME')
     forecast_prophet = prophet_model.predict(future)
 
-    # ---- ARIMA Model ----
-    arima_confidence = ARIMA(df['consumer_confidence_index_texas'], order=(1,1,1)).fit()
+    arima_confidence = fit_arima_model(df['consumer_confidence_index_texas'])
     forecast_arima_confidence = arima_confidence.forecast(steps=forecast_months)
 
-    # ---- SARIMA Model ----
-    sarima_confidence = SARIMAX(df['consumer_confidence_index_texas'], order=(1,1,1), seasonal_order=(1,1,1,12)).fit()
+    sarima_confidence = fit_sarima_model(df['consumer_confidence_index_texas'])
     forecast_sarima_confidence = sarima_confidence.forecast(steps=forecast_months)
 
-    # ---- Holt-Winters (ETS) ----
-    ets_confidence = ExponentialSmoothing(df['consumer_confidence_index_texas'].dropna(), trend="add", seasonal="add", seasonal_periods=12).fit()
+    ets_confidence = fit_ets_model(df['consumer_confidence_index_texas'].dropna())
     forecast_ets_confidence = ets_confidence.forecast(steps=forecast_months)
 
     # ---- Plot all forecasts ----
@@ -254,10 +230,6 @@ with tab2:
     # ---- Key Insights ----
     st.markdown("### 🔍 Key Insights")
     st.markdown(
-
-
-
-
     """
     **What is Consumer Confidence?**  
     - This index reflects **how optimistic or pessimistic consumers feel** about the economy.
@@ -274,8 +246,9 @@ with tab2:
     - **Stable consumer confidence = strong economy.**
     - If confidence drops, **business spending and investments may decline**.
     """
+    )
 
-
+    st.markdown(
     """
     - **Prophet:** Captures trends & seasonality, robust to missing data.
     - **ARIMA:** Works well if data is non-seasonal and follows a linear trend.
@@ -288,60 +261,7 @@ with tab2:
     """
     )
 
-
-
-
-
-    # ---- 🖥️ Consumer Confidence Forecast with Multiple Models ----
-    st.subheader("📊 Forecasting Consumer Confidence Index (TX)")
-
-    # Prepare Data
-    df_prophet = df[['consumer_confidence_index_texas']].reset_index().rename(columns={"date": "ds", "consumer_confidence_index_texas": "y"})
-
-    # 📈 Prophet Forecast
-    st.subheader("💳 Prophet Forecast")
-    prophet_model = Prophet()
-    prophet_model.fit(df_prophet)
-
-    future = prophet_model.make_future_dataframe(periods=forecast_months, freq='ME')
-    forecast_prophet = prophet_model.predict(future)
-
-    fig1 = prophet_model.plot(forecast_prophet)
-    st.pyplot(fig1)
-
-    # 📅 SARIMA Forecast (Seasonal ARIMA)
-    st.subheader("💵 SARIMA Forecast")
-    sarima_model = SARIMAX(df['consumer_confidence_index_texas'], order=(1,1,1), seasonal_order=(1,1,1,12)).fit()
-    forecast_sarima = sarima_model.forecast(steps=forecast_months)
-
-    fig2, ax2 = plt.subplots(figsize=(8, 4))
-    ax2.plot(df.index, df['consumer_confidence_index_texas'], label="Actual", color="blue")
-    ax2.plot(pd.date_range(df.index[-1], periods=forecast_months, freq='ME'), forecast_sarima, linestyle="dashed", color="red", label="SARIMA Forecast")
-    ax2.legend()
-    st.pyplot(fig2)
-
-    # 💡 Holt-Winters (ETS - Exponential Smoothing)
-    st.subheader("📈 Holt-Winters (ETS) Forecast")
-    ets_input = df['consumer_confidence_index_texas'].dropna()
-
-    if len(ets_input) >= 12:
-        seasonal_period = min(6, max(2, len(ets_input) // 2))
-        ets_model = ExponentialSmoothing(ets_input, trend="add", seasonal="add", seasonal_periods=seasonal_period).fit()
-        forecast_ets = ets_model.forecast(forecast_months)
-    else:
-        st.warning("⚠ Not enough data for Holt-Winters model. Using simple moving average instead.")
-        forecast_ets = ets_input.rolling(window=3, min_periods=1).mean().iloc[-1]
-        forecast_ets = [forecast_ets] * forecast_months
-
-    fig3, ax3 = plt.subplots(figsize=(8, 4))
-    ax3.plot(df.index, df['consumer_confidence_index_texas'], label="Actual", color="blue")
-    ax3.plot(pd.date_range(df.index[-1], periods=forecast_months, freq='ME'), forecast_ets, linestyle="dashed", color="green", label="ETS Forecast")
-    ax3.legend()
-    st.pyplot(fig3)
-
-
-
-
+# ---- TAB 3: USA vs Texas Comparisons ----
 with tab3:
     st.session_state["active_tab"] = "USA vs Texas Comparisons"
     st.header("🏛️ USA vs 🤠 Texas Economic Comparison")
@@ -384,11 +304,7 @@ with tab3:
         """
     )
 
-
-
 # ---- Footer Section ----
 st.markdown("---")
 st.markdown("🔗 **LinkedIn:** [Cheran Ratnam](https://www.linkedin.com/in/cheranratnam)")
 st.markdown("📄 **Data Source:** [Texas Open Data Portal](https://data.texas.gov/dataset/Key-Economic-Indicators/karz-jr5v)")
-
-
