@@ -13,28 +13,30 @@ st.subheader("Explore Texas Economic Trends and Forecasts")
 @st.cache_data
 def load_data():
     url = "https://raw.githubusercontent.com/cheranratnam87/Texas_Economic_Visuals/main/Key_Economic_Indicators_20250309.csv"
-    
-    dtype_dict = {
-        "year": "int16", 
-        "month": "int8",
-        "unemployment_tx": "float32",
-        "consumer_confidence_index_texas": "float32",
-        "consumer_confidence_index_us": "float32",
-        "unemployment_us": "float32",
-        "nonfarm_employment_tx": "float32",
-        "nonfarm_employment_us": "float32"
-    }
 
-    df = pd.read_csv(url, dtype=dtype_dict, low_memory=False)
-    
-    # Convert 'year' and 'month' to datetime and set index
+    # Load data with error handling
+    try:
+        df = pd.read_csv(url, low_memory=False)
+        df.rename(columns=lambda x: x.strip().lower(), inplace=True)  # Normalize column names
+    except Exception as e:
+        st.error(f"Error loading data: {e}")
+        return None
+
+    # Debugging: Print column names
+    print("Columns in dataset:", df.columns)
+
+    # Ensure required columns exist
+    required_columns = {'year', 'month'}
+    if not required_columns.issubset(set(df.columns)):
+        st.error("🚨 Missing required columns: 'year' or 'month'. Please check the dataset.")
+        return None
+
+    # Convert 'year' and 'month' to datetime index
     df['date'] = pd.to_datetime(df[['year', 'month']].assign(day=1))
     df.set_index('date', inplace=True)
 
-    # Add a 'year' column for fast filtering
-    df["year"] = df.index.year  
-
     return df
+
 
 
 df = load_data()
